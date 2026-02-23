@@ -23,10 +23,7 @@ func TestRunCompletesAndAggregates(t *testing.T) {
 		Timeout:     5 * time.Second,
 	}
 
-	res, err := Run(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	res := Run(cfg)
 
 	if res.TotalRequests == 0 {
 		t.Fatal("expected at least one request")
@@ -59,10 +56,7 @@ func TestRunCountsFailures(t *testing.T) {
 		Timeout:     5 * time.Second,
 	}
 
-	res, err := Run(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	res := Run(cfg)
 
 	if res.Succeeded != 0 {
 		t.Errorf("expected 0 succeeded, got %d", res.Succeeded)

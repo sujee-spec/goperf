@@ -50,6 +50,11 @@ func TestParse(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "invalid http method",
+			args:    []string{"-url", "http://example.com", "-method", "BANANA"},
+			wantErr: true,
+		},
+		{
 			name:    "invalid flag",
 			args:    []string{"-nonexistent"},
 			wantErr: true,

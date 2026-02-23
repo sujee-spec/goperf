@@ -1,3 +1,4 @@
+// Package worker implements the HTTP request loop for a single load-test worker.
 package worker
 
 import (
@@ -30,9 +31,13 @@ func Run(ctx context.Context, client *http.Client, method, url string, results c
 			if ctx.Err() != nil {
 				return
 			}
-			results <- Result{
+			select {
+			case results <- Result{
 				Duration: time.Since(start),
 				Error:    err,
+			}:
+			case <-ctx.Done():
+				return
 			}
 			continue
 		}
@@ -44,19 +49,29 @@ func Run(ctx context.Context, client *http.Client, method, url string, results c
 			if ctx.Err() != nil {
 				return
 			}
-			results <- Result{
+			select {
+			case results <- Result{
 				Duration: elapsed,
 				Error:    err,
+			}:
+			case <-ctx.Done():
+				return
 			}
 			continue
 		}
 
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		func() {
+			defer resp.Body.Close()
+			io.Copy(io.Discard, resp.Body)
+		}()
 
-		results <- Result{
+		select {
+		case results <- Result{
 			Duration:   elapsed,
 			StatusCode: resp.StatusCode,
+		}:
+		case <-ctx.Done():
+			return
 		}
 	}
 }

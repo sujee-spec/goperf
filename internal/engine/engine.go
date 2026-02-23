@@ -1,3 +1,4 @@
+// Package engine orchestrates concurrent workers and aggregates load test results.
 package engine
 
 import (
@@ -11,6 +12,7 @@ import (
 	"goperf/internal/worker"
 )
 
+// Result holds the aggregated outcome of a load test run.
 type Result struct {
 	TotalRequests int
 	Succeeded     int
@@ -19,7 +21,9 @@ type Result struct {
 	TotalDuration time.Duration
 }
 
-func Run(cfg config.Config) (Result, error) {
+// Run executes the load test with the given configuration, launching
+// concurrent workers and collecting their results into a single Result.
+func Run(cfg config.Config) Result {
 	transport := &http.Transport{
 		MaxIdleConnsPerHost: cfg.Concurrency,
 		DialContext: (&net.Dialer{
@@ -64,5 +68,5 @@ func Run(cfg config.Config) (Result, error) {
 	}
 	res.TotalDuration = time.Since(start)
 
-	return res, nil
+	return res
 }

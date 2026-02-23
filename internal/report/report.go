@@ -1,8 +1,10 @@
+// Package report computes latency statistics and prints formatted load test results.
 package report
 
 import (
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"goperf/internal/engine"
 )
 
+// Stats holds computed latency percentiles and throughput for a load test.
 type Stats struct {
 	Average time.Duration
 	P50     time.Duration
@@ -18,6 +21,8 @@ type Stats struct {
 	RPS     float64
 }
 
+// Compute calculates latency percentiles, average, and requests per second
+// from the raw engine result.
 func Compute(res engine.Result) Stats {
 	if len(res.Latencies) == 0 {
 		return Stats{}
@@ -42,8 +47,10 @@ func Compute(res engine.Result) Stats {
 	}
 }
 
+// percentileIndex returns the index for the given percentile using the
+// nearest-rank method: index = ceil(p/100 * n) - 1.
 func percentileIndex(n, p int) int {
-	idx := (n*p)/100 - 1
+	idx := int(math.Ceil(float64(p)/100*float64(n))) - 1
 	if idx < 0 {
 		return 0
 	}
@@ -53,21 +60,35 @@ func percentileIndex(n, p int) int {
 	return idx
 }
 
-func Print(w io.Writer, cfg config.Config, res engine.Result) {
+// Print writes a formatted load test report to the given writer.
+func Print(w io.Writer, cfg config.Config, res engine.Result) error {
 	stats := Compute(res)
 
-	fmt.Fprintf(w, "\n--- goperf results ---\n")
-	fmt.Fprintf(w, "Target:       %s %s\n", cfg.Method, cfg.URL)
-	fmt.Fprintf(w, "Duration:     %s\n", res.TotalDuration.Round(time.Millisecond))
-	fmt.Fprintf(w, "Concurrency:  %d\n", cfg.Concurrency)
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "Requests:     %d total, %d succeeded, %d failed\n", res.TotalRequests, res.Succeeded, res.Failed)
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "Latency:\n")
-	fmt.Fprintf(w, "  Average:    %s\n", stats.Average.Round(time.Microsecond))
-	fmt.Fprintf(w, "  P50:        %s\n", stats.P50.Round(time.Microsecond))
-	fmt.Fprintf(w, "  P90:        %s\n", stats.P90.Round(time.Microsecond))
-	fmt.Fprintf(w, "  P99:        %s\n", stats.P99.Round(time.Microsecond))
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "Throughput:   %.2f req/s\n", stats.RPS)
+	_, err := fmt.Fprintf(w, `
+--- goperf results ---
+Target:       %s %s
+Duration:     %s
+Concurrency:  %d
+
+Requests:     %d total, %d succeeded, %d failed
+
+Latency:
+  Average:    %s
+  P50:        %s
+  P90:        %s
+  P99:        %s
+
+Throughput:   %.2f req/s
+`,
+		cfg.Method, cfg.URL,
+		res.TotalDuration.Round(time.Millisecond),
+		cfg.Concurrency,
+		res.TotalRequests, res.Succeeded, res.Failed,
+		stats.Average.Round(time.Microsecond),
+		stats.P50.Round(time.Microsecond),
+		stats.P90.Round(time.Microsecond),
+		stats.P99.Round(time.Microsecond),
+		stats.RPS,
+	)
+	return err
 }

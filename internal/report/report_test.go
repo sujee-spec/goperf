@@ -26,6 +26,10 @@ func TestComputePercentiles(t *testing.T) {
 
 	stats := Compute(res)
 
+	// nearest-rank: ceil(p/100 * n) - 1
+	// P50: ceil(0.50*100)-1 = 49 → 50ms
+	// P90: ceil(0.90*100)-1 = 89 → 90ms
+	// P99: ceil(0.99*100)-1 = 98 → 99ms
 	if stats.P50 != 50*time.Millisecond {
 		t.Errorf("P50 = %v, want 50ms", stats.P50)
 	}
@@ -97,7 +101,10 @@ func TestPrintContainsExpectedSections(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	Print(&buf, cfg, res)
+	err := Print(&buf, cfg, res)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	output := buf.String()
 
 	expected := []string{
