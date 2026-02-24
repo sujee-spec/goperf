@@ -19,6 +19,8 @@ type Stats struct {
 	P90     time.Duration
 	P99     time.Duration
 	RPS     float64
+	Fastest time.Duration
+	Slowest time.Duration
 }
 
 // Compute calculates latency percentiles, average, and requests per second
@@ -44,6 +46,8 @@ func Compute(res engine.Result) Stats {
 		P90:     sorted[percentileIndex(n, 90)],
 		P99:     sorted[percentileIndex(n, 99)],
 		RPS:     float64(res.TotalRequests) / res.TotalDuration.Seconds(),
+		Fastest: sorted[0],
+		Slowest: sorted[n-1],
 	}
 }
 
@@ -73,6 +77,8 @@ Concurrency:  %d
 Requests:     %d total, %d succeeded, %d failed
 
 Latency:
+  Fastest:    %s
+  Slowest:    %s
   Average:    %s
   P50:        %s
   P90:        %s
@@ -84,6 +90,8 @@ Throughput:   %.2f req/s
 		res.TotalDuration.Round(time.Millisecond),
 		cfg.Concurrency,
 		res.TotalRequests, res.Succeeded, res.Failed,
+		stats.Fastest.Round(time.Microsecond),
+		stats.Slowest.Round(time.Microsecond),
 		stats.Average.Round(time.Microsecond),
 		stats.P50.Round(time.Microsecond),
 		stats.P90.Round(time.Microsecond),
