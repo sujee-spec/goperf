@@ -90,5 +90,25 @@ Throughput:   %.2f req/s
 		stats.P99.Round(time.Microsecond),
 		stats.RPS,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	if len(res.StatusCodes) > 0 {
+		fmt.Fprintf(w, "Status codes:\n")
+		for code, count := range res.StatusCodes {
+			fmt.Fprintf(w, "  [%d]        %d\n", code, count)
+		}
+		fmt.Fprintln(w)
+	}
+
+	if len(res.Errors) > 0 {
+		fmt.Fprintf(w, "Errors:\n")
+		for msg, count := range res.Errors {
+			fmt.Fprintf(w, "  (%d) %s\n", count, msg)
+		}
+		fmt.Fprintln(w)
+	}
+
+	return nil
 }

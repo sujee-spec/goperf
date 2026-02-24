@@ -46,15 +46,18 @@ func Run(ctx context.Context, client *http.Client, method, url string, results c
 		elapsed := time.Since(start)
 
 		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
+			// Record the error even if context was cancelled mid-request.
+			// This ensures in-flight requests at shutdown are counted.
 			select {
 			case results <- Result{
 				Duration: elapsed,
 				Error:    err,
 			}:
 			case <-ctx.Done():
+				// Channel full and context done — best-effort, drop it.
+				return
+			}
+			if ctx.Err() != nil {
 				return
 			}
 			continue

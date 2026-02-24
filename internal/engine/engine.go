@@ -17,6 +17,8 @@ type Result struct {
 	TotalRequests int
 	Succeeded     int
 	Failed        int
+	StatusCodes   map[int]int
+	Errors        map[string]int
 	Latencies     []time.Duration
 	TotalDuration time.Duration
 }
@@ -56,13 +58,21 @@ func Run(cfg config.Config) Result {
 	}()
 
 	start := time.Now()
-	var res Result
+	res := Result{
+		StatusCodes: make(map[int]int),
+		Errors:      make(map[string]int),
+	}
 	for rr := range results {
 		res.TotalRequests++
-		if rr.Error != nil || rr.StatusCode >= 400 {
+		if rr.Error != nil {
 			res.Failed++
+			res.Errors[rr.Error.Error()]++
+		} else if rr.StatusCode >= 400 {
+			res.Failed++
+			res.StatusCodes[rr.StatusCode]++
 		} else {
 			res.Succeeded++
+			res.StatusCodes[rr.StatusCode]++
 		}
 		res.Latencies = append(res.Latencies, rr.Duration)
 	}

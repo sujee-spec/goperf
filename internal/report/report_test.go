@@ -93,6 +93,8 @@ func TestPrintContainsExpectedSections(t *testing.T) {
 		TotalRequests: 100,
 		Succeeded:     95,
 		Failed:        5,
+		StatusCodes:   map[int]int{200: 95, 500: 5},
+		Errors:        map[string]int{},
 		Latencies:     make([]time.Duration, 100),
 		TotalDuration: 10 * time.Second,
 	}
