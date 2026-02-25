@@ -16,22 +16,34 @@ import (
 	"goperf/internal/report"
 )
 
-func runFullPipeline(t *testing.T, args []string) (engine.Result, string, error) {
+func runFullPipeline(t *testing.T, args []string) (engine.Result, string) {
 	t.Helper()
 
 	cfg, err := config.Parse(args)
 	if err != nil {
-		return engine.Result{}, "", fmt.Errorf("config parse: %w", err)
+		t.Fatalf("config parse: %v", err)
 	}
 
 	res := engine.Run(cfg)
 
 	var buf bytes.Buffer
 	if err := report.Print(&buf, cfg, res); err != nil {
-		return res, "", fmt.Errorf("report print: %w", err)
+		t.Fatalf("report print: %v", err)
 	}
 
-	return res, buf.String(), nil
+	return res, buf.String()
+}
+
+func containsError(errors map[string]int, substrs ...string) bool {
+	for msg := range errors {
+		lower := strings.ToLower(msg)
+		for _, s := range substrs {
+			if strings.Contains(lower, s) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestIntegration_FullSuccessfulRun(t *testing.T) {
@@ -40,29 +52,25 @@ func TestIntegration_FullSuccessfulRun(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, output, err := runFullPipeline(t, []string{
+	res, output := runFullPipeline(t, []string{
 		"-url", srv.URL,
 		"-concurrency", "5",
 		"-duration", "200ms",
 	})
-	if err != nil {
-		t.Fatalf("pipeline failed: %v", err)
-	}
 
 	if res.TotalRequests == 0 {
 		t.Fatal("expected at least one request")
 	}
 	if res.Succeeded == 0 {
-		t.Error("expected some successful requests")
+		t.Fatal("expected some successful requests")
 	}
-	// A small number of in-flight requests may fail when the context expires.
-	// Allow up to 1% failure rate (minimum 2) to account for this.
+
 	maxAllowed := res.TotalRequests / 100
 	if maxAllowed < 2 {
 		maxAllowed = 2
 	}
 	if res.Failed > maxAllowed {
-		t.Errorf("too many failures: %d out of %d (max allowed %d)",
+		t.Errorf("too many failures: got %d out of %d total (max allowed %d)",
 			res.Failed, res.TotalRequests, maxAllowed)
 	}
 
@@ -76,7 +84,7 @@ func TestIntegration_FullSuccessfulRun(t *testing.T) {
 		"[200]",
 	} {
 		if !strings.Contains(output, section) {
-			t.Errorf("report missing section %q", section)
+			t.Errorf("report output missing %q", section)
 		}
 	}
 }
@@ -93,79 +101,61 @@ func TestIntegration_MixedStatusCodes(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, output, err := runFullPipeline(t, []string{
+	res, output := runFullPipeline(t, []string{
 		"-url", srv.URL,
 		"-concurrency", "2",
 		"-duration", "200ms",
 	})
-	if err != nil {
-		t.Fatalf("pipeline failed: %v", err)
-	}
 
 	if res.Succeeded == 0 {
-		t.Error("expected some successes")
+		t.Error("expected some successful requests")
 	}
 	if res.Failed == 0 {
-		t.Error("expected some failures")
+		t.Error("expected some failed requests")
 	}
-	if res.Succeeded+res.Failed != res.TotalRequests {
-		t.Errorf("succeeded (%d) + failed (%d) != total (%d)",
-			res.Succeeded, res.Failed, res.TotalRequests)
-	}
-
-	if _, ok := res.StatusCodes[200]; !ok {
-		t.Error("expected status code 200 in results")
-	}
-	if _, ok := res.StatusCodes[500]; !ok {
-		t.Error("expected status code 500 in results")
+	if got, want := res.Succeeded+res.Failed, res.TotalRequests; got != want {
+		t.Errorf("succeeded (%d) + failed (%d) = %d, want total %d",
+			res.Succeeded, res.Failed, got, want)
 	}
 
-	if !strings.Contains(output, "[200]") {
-		t.Error("report missing [200] status code")
-	}
-	if !strings.Contains(output, "[500]") {
-		t.Error("report missing [500] status code")
+	wantCodes := []int{200, 500}
+	for _, code := range wantCodes {
+		if _, ok := res.StatusCodes[code]; !ok {
+			t.Errorf("result missing status code %d", code)
+		}
+		if !strings.Contains(output, fmt.Sprintf("[%d]", code)) {
+			t.Errorf("report output missing [%d]", code)
+		}
 	}
 }
 
-func TestIntegration_TimeœoutHandling(t *testing.T) {
+func TestIntegration_TimeoutHandling(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	res, output, err := runFullPipeline(t, []string{
+	res, output := runFullPipeline(t, []string{
 		"-url", srv.URL,
 		"-concurrency", "3",
 		"-duration", "300ms",
 		"-timeout", "50ms",
 	})
-	if err != nil {
-		t.Fatalf("pipeline failed: %v", err)
-	}
 
 	if res.Failed == 0 {
 		t.Error("expected failures from timeouts")
 	}
 	if len(res.Errors) == 0 {
-		t.Error("expected error messages in results")
+		t.Fatal("expected error messages in results")
 	}
 
-	hasTimeoutErr := false
-	for msg := range res.Errors {
-		lower := strings.ToLower(msg)
-		if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline") {
-			hasTimeoutErr = true
-			break
-		}
-	}
-	if !hasTimeoutErr {
-		t.Errorf("expected timeout-related error, got errors: %v", res.Errors)
+	if !containsError(res.Errors, "timeout", "deadline") {
+		t.Errorf("expected timeout-related error, got: %v", res.Errors)
 	}
 
 	if !strings.Contains(output, "Errors:") {
-		t.Error("report missing Errors section")
+		t.Error("report output missing Errors section")
 	}
 }
 
@@ -177,7 +167,7 @@ func TestIntegration_ConcurrencyVerification(t *testing.T) {
 		current := inflight.Add(1)
 		defer inflight.Add(-1)
 
-		// Track peak concurrency.
+		// Track peak concurrency with lock-free CAS loop.
 		for {
 			old := peak.Load()
 			if current <= old || peak.CompareAndSwap(old, current) {
@@ -190,15 +180,12 @@ func TestIntegration_ConcurrencyVerification(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	concurrency := 5
-	res, _, err := runFullPipeline(t, []string{
+	const concurrency = 5
+	res, _ := runFullPipeline(t, []string{
 		"-url", srv.URL,
 		"-concurrency", fmt.Sprintf("%d", concurrency),
 		"-duration", "500ms",
 	})
-	if err != nil {
-		t.Fatalf("pipeline failed: %v", err)
-	}
 
 	if res.TotalRequests == 0 {
 		t.Fatal("expected requests to be made")
@@ -206,10 +193,10 @@ func TestIntegration_ConcurrencyVerification(t *testing.T) {
 
 	observed := peak.Load()
 	if observed < 2 {
-		t.Errorf("expected peak concurrency >= 2, got %d", observed)
+		t.Errorf("peak concurrency = %d, want >= 2", observed)
 	}
-	if observed > int64(concurrency) {
-		t.Errorf("peak concurrency %d exceeded configured %d", observed, concurrency)
+	if observed > concurrency {
+		t.Errorf("peak concurrency = %d, exceeds configured %d", observed, concurrency)
 	}
 }
 
@@ -222,29 +209,31 @@ func TestIntegration_ShortDuration(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _, err := runFullPipeline(t, []string{
+		runFullPipeline(t, []string{
 			"-url", srv.URL,
 			"-concurrency", "3",
 			"-duration", "50ms",
 		})
-		if err != nil {
-			t.Errorf("pipeline failed: %v", err)
-		}
 	}()
 
 	select {
 	case <-done:
-		// Completed normally.
 	case <-time.After(5 * time.Second):
 		t.Fatal("test hung: 50ms duration did not complete within 5s")
 	}
 }
 
 func TestIntegration_HTTPMethods(t *testing.T) {
-	methods := []string{"POST", "PUT", "DELETE"}
+	tests := []struct {
+		method string
+	}{
+		{method: "POST"},
+		{method: "PUT"},
+		{method: "DELETE"},
+	}
 
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
 			var receivedMethod atomic.Value
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -253,15 +242,12 @@ func TestIntegration_HTTPMethods(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			res, _, err := runFullPipeline(t, []string{
+			res, _ := runFullPipeline(t, []string{
 				"-url", srv.URL,
-				"-method", method,
+				"-method", tt.method,
 				"-concurrency", "2",
 				"-duration", "100ms",
 			})
-			if err != nil {
-				t.Fatalf("pipeline failed: %v", err)
-			}
 
 			if res.TotalRequests == 0 {
 				t.Fatal("expected at least one request")
@@ -271,8 +257,8 @@ func TestIntegration_HTTPMethods(t *testing.T) {
 			if !ok {
 				t.Fatal("server never received a request")
 			}
-			if got != method {
-				t.Errorf("server received method %q, want %q", got, method)
+			if got != tt.method {
+				t.Errorf("server received method %q, want %q", got, tt.method)
 			}
 		})
 	}
@@ -296,39 +282,25 @@ func TestIntegration_ConnectionErrors(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, output, err := runFullPipeline(t, []string{
+	res, output := runFullPipeline(t, []string{
 		"-url", srv.URL,
 		"-concurrency", "2",
 		"-duration", "200ms",
 		"-timeout", "1s",
 	})
-	if err != nil {
-		t.Fatalf("pipeline failed: %v", err)
-	}
 
 	if res.Failed == 0 {
 		t.Error("expected failures from connection errors")
 	}
 	if len(res.Errors) == 0 {
-		t.Error("expected error messages in results")
+		t.Fatal("expected error messages in results")
 	}
 
-	hasConnErr := false
-	for msg := range res.Errors {
-		lower := strings.ToLower(msg)
-		if strings.Contains(lower, "eof") ||
-			strings.Contains(lower, "reset") ||
-			strings.Contains(lower, "connection") ||
-			strings.Contains(lower, "broken pipe") {
-			hasConnErr = true
-			break
-		}
-	}
-	if !hasConnErr {
-		t.Errorf("expected connection-related error, got errors: %v", res.Errors)
+	if !containsError(res.Errors, "eof", "reset", "connection", "broken pipe") {
+		t.Errorf("expected connection-related error, got: %v", res.Errors)
 	}
 
 	if !strings.Contains(output, "Errors:") {
-		t.Error("report missing Errors section")
+		t.Error("report output missing Errors section")
 	}
 }
